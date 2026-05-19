@@ -1,0 +1,24 @@
+<configuration>
+
+    <!-- Console appender – for development / Docker logs -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Root logger -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+    <!-- Silence noisy Hadoop / Parquet internals -->
+    <logger name="org.apache.hadoop"         level="WARN"/>
+    <logger name="org.apache.parquet"        level="WARN"/>
+    <logger name="org.apache.kafka.streams"  level="INFO"/>
+    <logger name="org.apache.kafka.clients"  level="WARN"/>
+
+    <!-- Verbose debugging for our own packages -->
+    <logger name="com.example.centralstation" level="DEBUG"/>
+
+</configuration>

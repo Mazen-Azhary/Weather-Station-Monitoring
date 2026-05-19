@@ -1,0 +1,35 @@
+Terminal 1 — Start Kafka
+cd "\Weather-Station-Monitoring"
+
+# Stop any existing Kafka first
+docker compose -f docker-compose-kafka.yml down
+
+# Start the fixed Kafka (supports both Docker internal + localhost)
+docker compose -f docker-compose-kafka.yml up -d
+
+docker exec kafka kafka-topics --bootstrap-server localhost:29092 --create --if-not-exists --topic weather-readings --partitions 10 --replication-factor 1
+
+docker exec kafka kafka-topics --bootstrap-server localhost:29092 --create --if-not-exists --topic raining-alerts --partitions 3 --replication-factor 1
+
+Confirm both exist:
+docker exec kafka kafka-topics --bootstrap-server localhost:29092 --list
+
+Terminal 2 — Build and Run the App
+cd "\Weather-Station-Monitoring\CentralStation"
+
+mvn package -DskipTests -q
+
+$env:KAFKA_BOOTSTRAP_SERVERS = "localhost:29092"
+$env:PARQUET_OUTPUT_PATH     = "..\parquet-output"
+
+java -jar target\CentralStation-1.0-SNAPSHOT.jar
+
+Terminal 3 — Watch Rain Alerts
+docker exec kafka kafka-console-consumer --bootstrap-server localhost:29092 --topic raining-alerts --from-beginning
+
+Terminal 4 — Send Test Messages
+docker exec -i kafka kafka-console-producer --bootstrap-server localhost:29092 --topic weather-readings
+
+No rain : {"station_id":1,"s_no":1,"battery_status":"high","status_timestamp":1716076800,"weather":{"humidity":35,"temperature":25,"wind_speed":10}}
+Rain trigger : {"station_id":3,"s_no":1,"battery_status":"medium","status_timestamp":1716076800,"weather":{"humidity":82,"temperature":28,"wind_speed":12}}
+Rain trigger : {"station_id":5,"s_no":1,"battery_status":"low","status_timestamp":1716076900,"weather":{"humidity":91,"temperature":35,"wind_speed":20}}
