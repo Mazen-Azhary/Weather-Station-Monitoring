@@ -1,15 +1,17 @@
 public class ReadManager {
 
-    private FileManager f;
-    private HashMapManager hmm;
+    private HintFileManager hfm;
 
     public ReadManager() {
-        this.f   = FileManager.getInstance();
-        this.hmm = HashMapManager.getInstance();
+        this.hfm = HintFileManager.getInstance();
     }
 
+    // Read path:
+    //   1. HintFileManager checks HashMapManager first.
+    //   2. On a miss it seeks directly into the correct data file using the
+    //      hint index (filename + offset + size), warms the cache, and returns.
+    //   3. Returns null if the id has never been written.
     public String read(String stationID) {
-        // TODO: implement
-        return null;
+        return hfm.read(stationID);
     }
 }
