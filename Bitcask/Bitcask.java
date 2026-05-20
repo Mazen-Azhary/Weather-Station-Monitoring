@@ -1,7 +1,7 @@
 public class Bitcask {
 
     private WriteManager w;
-    private ReadManager r;
+    private ReadManager  r;
 
     public Bitcask() {
         this.w = new WriteManager();
@@ -9,10 +9,10 @@ public class Bitcask {
     }
 
     public String read(String stationID) {
-        return  this.r.read(stationID);
+        return this.r.read(stationID);
     }
 
     public void write(String stationID, String status) {
-        this.w.(stationID,status);
+        this.w.write(stationID, status);
     }
 }

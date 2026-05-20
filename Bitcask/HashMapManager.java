@@ -1,3 +1,4 @@
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,5 +42,10 @@ public class HashMapManager {
     // Wipe the in-memory map (called before a full rebuild after compaction).
     public void clear() {
         mp.clear();
+    }
+
+    // Read-only view of the entire cache — used by the CLI dashboard.
+    public Map<String, String> getAll() {
+        return Collections.unmodifiableMap(mp);
     }
 }

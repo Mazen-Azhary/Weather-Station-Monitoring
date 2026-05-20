@@ -12,8 +12,9 @@ public class FileManager {
     private RandomAccessFile activeRAF;
     private static final int MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
     private static final String DIRECTORY = "./Files/";
+    private static final int HEADER_BLOCK_SIZE = 1024 * 1024; // 1 MB reserved header (matches CompactionManager)
 
-    // Binary record layout:
+    // Binary record layout (written after the header block):
     //  [4 bytes: idLength][idLength bytes: id][4 bytes: valueLength][valueLength bytes: value]
 
     private FileManager() {
@@ -41,80 +42,77 @@ public class FileManager {
         File[] found = dir.listFiles((d, name) -> name.endsWith(".bin"));
 
         if (found != null && found.length > 0) {
-            // Sort descending by filename (filenames are timestamps → largest = latest)
             Arrays.sort(found, Comparator.comparing(File::getName).reversed());
             for (File f : found) {
                 files.add(f);
             }
-            File latest = found[0]; // largest filename
+            File latest = found[0];
             if (latest.length() < MAX_FILE_SIZE_BYTES) {
                 activeFile = latest;
             } else {
-                createFile(System.currentTimeMillis());
+                createFile(TimestampGenerator.generateTimestamp());
             }
         } else {
-            createFile(System.currentTimeMillis());
+            createFile(TimestampGenerator.generateTimestamp());
         }
 
-        // Open a RandomAccessFile handle for the active file (append mode)
         try {
             activeRAF = new RandomAccessFile(activeFile, "rw");
-            activeRAF.seek(activeFile.length()); // position at end for appending
+            activeRAF.seek(activeFile.length());
         } catch (IOException e) {
             throw new RuntimeException("Failed to open active file: " + activeFile.getName(), e);
         }
     }
 
     // -------------------------------------------------------------------------
-    // Create a new binary file named after the given timestamp and set it active.
+    // Create a new binary file named after the given timestamp.
+    // The file starts with a HEADER_BLOCK_SIZE zero‑filled header.
     // -------------------------------------------------------------------------
-    public void createFile(long timestamp) {
+    public void createFile(String timestamp) {
         String filename = DIRECTORY + timestamp + ".bin";
         File newFile = new File(filename);
         try {
             newFile.createNewFile();
+            try (RandomAccessFile raf = new RandomAccessFile(newFile, "rw")) {
+                raf.write(new byte[HEADER_BLOCK_SIZE]);  // reserve header block
+            }
         } catch (IOException e) {
             throw new RuntimeException("Failed to create file: " + filename, e);
         }
         files.add(newFile);
         activeFile = newFile;
 
-        // Re-open the RAF handle for the new active file
         try {
             if (activeRAF != null) {
                 activeRAF.close();
             }
             activeRAF = new RandomAccessFile(activeFile, "rw");
+            activeRAF.seek(activeFile.length());
         } catch (IOException e) {
             throw new RuntimeException("Failed to open new active file: " + filename, e);
         }
     }
 
     // -------------------------------------------------------------------------
-    // Write a record to the active file.
-    // Returns the byte offset at which the record was written.
+    // Write a record to the active file (after the header block).
+    // Returns the absolute byte offset (including header) at which the record was written.
     // Rotates to a new file automatically if the active file is full.
-    // Binary format: [4B idLen][id bytes][4B valueLen][value bytes]
     // -------------------------------------------------------------------------
     public long writeRecord(String id, String value) {
         byte[] idBytes    = id.getBytes();
         byte[] valueBytes = value.getBytes();
         int recordSize    = 4 + idBytes.length + 4 + valueBytes.length;
 
-        // Rotate if needed
         try {
             if (activeFile.length() + recordSize > MAX_FILE_SIZE_BYTES) {
-                createFile(System.currentTimeMillis());
+                createFile(TimestampGenerator.generateTimestamp());
             }
 
-            long offset = activeRAF.length();
+            long offset = activeRAF.length();   // absolute position (includes header)
             activeRAF.seek(offset);
 
-            // Write id
             activeRAF.writeInt(idBytes.length);
             activeRAF.write(idBytes);
-
-            // Write value
             activeRAF.writeInt(valueBytes.length);
             activeRAF.write(valueBytes);
 
@@ -125,8 +123,8 @@ public class FileManager {
     }
 
     // -------------------------------------------------------------------------
-    // Read a record from the active file by scanning sequentially for the id.
-    // Returns the value string, or null if not found.
+    // Read a record from any file by scanning sequentially (fallback).
+    // Skips the header block of each file.
     // -------------------------------------------------------------------------
     public String readRecord(String id) {
         for (File file : files) {
@@ -137,10 +135,8 @@ public class FileManager {
     }
 
     // -------------------------------------------------------------------------
-    // Read a record from a specific file at a known offset and size.
-    // The 'offset' is the byte position of the record start.
-    // The 'size'   is the total byte length of the record.
-    // 'id' is used to verify the record matches (integrity check).
+    // Read a record from a specific file at a known absolute offset.
+    // The offset must already account for the header block.
     // -------------------------------------------------------------------------
     public String readRecord(String filename, int offset, int size, String id) {
         File file = new File(DIRECTORY + filename);
@@ -154,13 +150,12 @@ public class FileManager {
             raf.readFully(idBytes);
             String storedId = new String(idBytes);
 
-            if (!storedId.equals(id)) return null; // mismatch guard
+            if (!storedId.equals(id)) return null;
 
             int    valLen    = raf.readInt();
             byte[] valBytes  = new byte[valLen];
             raf.readFully(valBytes);
             return new String(valBytes);
-
         } catch (IOException e) {
             throw new RuntimeException("Failed to read record at offset " + offset + " in " + filename, e);
         }
@@ -199,7 +194,6 @@ public class FileManager {
 
     // -------------------------------------------------------------------------
     // Close the RandomAccessFile handle for the given filename.
-    // If it is the active file, also clear the activeFile reference.
     // -------------------------------------------------------------------------
     public void closeFile(String filename) {
         if (activeFile != null && activeFile.getName().equals(filename)) {
@@ -218,7 +212,6 @@ public class FileManager {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
-
     public File getActiveFile() {
         return activeFile;
     }
@@ -227,9 +220,50 @@ public class FileManager {
         return files;
     }
 
-    // Scan a single file sequentially for a matching id; returns value or null.
+    public int getMaxFileSizeBytes() {
+        return MAX_FILE_SIZE_BYTES;
+    }
+
+    public String getDirectory() {
+        return DIRECTORY;
+    }
+
+    public void registerFile(File file) {
+        if (!files.contains(file)) {
+            files.add(file);
+        }
+    }
+
+    public void reloadActiveFile() {
+        if (files.isEmpty()) {
+            createFile(TimestampGenerator.generateTimestamp());
+            return;
+        }
+        files.sort(Comparator.comparing(File::getName).reversed());
+        File latest = files.get(0);
+        try {
+            if (activeRAF != null) {
+                activeRAF.close();
+            }
+            if (latest.length() < MAX_FILE_SIZE_BYTES) {
+                activeFile = latest;
+            } else {
+                createFile(TimestampGenerator.generateTimestamp());
+                return;
+            }
+            activeRAF = new RandomAccessFile(activeFile, "rw");
+            activeRAF.seek(activeFile.length());
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to reload active file after compaction", e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Scan a single file sequentially (starting after the header) for a matching id.
+    // -------------------------------------------------------------------------
     private String readFromFile(File file, String id) {
         try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
+            raf.seek(HEADER_BLOCK_SIZE);   // skip the reserved header
             while (raf.getFilePointer() < raf.length()) {
                 int    idLen    = raf.readInt();
                 byte[] idBytes  = new byte[idLen];
@@ -248,61 +282,5 @@ public class FileManager {
             throw new RuntimeException("Failed to read from file: " + file.getName(), e);
         }
         return null;
-    }
-
-    // -------------------------------------------------------------------------
-    // Helpers used by CompactionManager
-    // -------------------------------------------------------------------------
-
-    /** Expose the configured max file size so CompactionManager can split correctly. */
-    public int getMaxFileSizeBytes() {
-        return MAX_FILE_SIZE_BYTES;
-    }
-
-    /** Expose the working directory so CompactionManager can place merge files there. */
-    public String getDirectory() {
-        return DIRECTORY;
-    }
-
-    /**
-     * Register an already-existing file (e.g. a renamed merge file) into the
-     * in-memory list without touching it on disk.
-     */
-    public void registerFile(File file) {
-        if (!files.contains(file)) {
-            files.add(file);
-        }
-    }
-
-    /**
-     * After compaction renames merge files to proper timestamps, call this to
-     * re-evaluate which file should be active (same logic as initActiveFile but
-     * without re-scanning the directory — the list is already up to date).
-     */
-    public void reloadActiveFile() {
-        if (files.isEmpty()) {
-            createFile(System.currentTimeMillis());
-            return;
-        }
-
-        // Sort descending by name; largest timestamp = most recent
-        files.sort(Comparator.comparing(File::getName).reversed());
-        File latest = files.get(0);
-
-        try {
-            if (activeRAF != null) {
-                activeRAF.close();
-            }
-            if (latest.length() < MAX_FILE_SIZE_BYTES) {
-                activeFile = latest;
-            } else {
-                createFile(System.currentTimeMillis());
-                return;
-            }
-            activeRAF = new RandomAccessFile(activeFile, "rw");
-            activeRAF.seek(activeFile.length());
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to reload active file after compaction", e);
-        }
     }
 }

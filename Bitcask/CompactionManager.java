@@ -7,7 +7,8 @@ public class CompactionManager {
     // Format: "id1:offset1,id2:offset2,..."
     // Unused bytes in the reserved block are zero-padded.
     // HEADER_BLOCK_SIZE must be large enough to hold all id:offset pairs for one merge file.
-    private static final int HEADER_BLOCK_SIZE = 64 * 1024; // 64 KB reserved for header
+    // Increased to 1 MB to accommodate up to ~10,000 entries (each ~20 bytes → 200 KB max).
+    private static final int HEADER_BLOCK_SIZE = 1024 * 1024; // 1 MB reserved for header
 
     private FileManager f;
 
@@ -103,7 +104,7 @@ public class CompactionManager {
         // Step 4: rename each merge file to a fresh timestamp and register with FileManager
         for (int i = 0; i < mergeFiles.size(); i++) {
             File   mf          = mergeFiles.get(i);
-            long   ts          = System.currentTimeMillis() + i; // +i ensures unique names
+            String ts          = TimestampGenerator.generateTimestamp(); // collision-resistant timestamp
             String newName     = ts + ".bin";
             File   renamed     = new File(f.getDirectory() + newName);
             mf.renameTo(renamed);
@@ -116,10 +117,13 @@ public class CompactionManager {
 
     // -------------------------------------------------------------------------
     // Scan a data file from start to finish and update the latestValues map.
-    // Binary format: [4B idLen][id][4B valLen][val] repeated.
+    // The file begins with a HEADER_BLOCK_SIZE reserved header (CSV mapping).
+    // After the header, binary records follow: [4B idLen][id][4B valLen][val].
     // -------------------------------------------------------------------------
     private void scanFile(File file, Map<String, String> latestValues) {
         try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
+            // Skip the reserved header block (present in every data file)
+            raf.seek(HEADER_BLOCK_SIZE);
             while (raf.getFilePointer() < raf.length()) {
                 int    idLen   = raf.readInt();
                 byte[] idBytes = new byte[idLen];
