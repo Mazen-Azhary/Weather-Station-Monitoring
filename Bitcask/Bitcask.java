@@ -9,11 +9,10 @@ public class Bitcask {
     }
 
     public String read(String stationID) {
-        // TODO: implement
-        return null;
+        return  this.r.read(stationID);
     }
 
     public void write(String stationID, String status) {
-        // TODO: implement
+        this.w.(stationID,status);
     }
 }
