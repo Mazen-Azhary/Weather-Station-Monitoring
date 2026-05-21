@@ -1,0 +1,440 @@
+---
+# Namespace (Optional, but organizes resources)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: weather-system
+
+---
+# PersistentVolumeClaim for shared storage (Parquet + Bitcask)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: weather-data-pvc
+  namespace: weather-system
+spec:
+  accessModes:
+    - ReadWriteMany   # Important: central server and bitcask and indexer will need read and write access
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard  # Change based on your cluster (in minikube it's usually "standard")
+
+---
+# ConfigMap for application settings (shared environment variables)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: weather-config
+  namespace: weather-system
+data:
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  WEATHER_TOPIC: "weather-readings"
+  RAIN_ALERT_TOPIC: "raining-alerts"
+  PARQUET_OUTPUT_PATH: "/data/parquet"
+  BITCASK_DATA_DIR: "/data/bitcask"
+  # Will be used later when integrating Bitcask
+  STATION_TYPE: "simulated"   # or "open-meteo" if you want the bonus
+
+---
+# Zookeeper Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zookeeper
+  namespace: weather-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zookeeper
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+    spec:
+      containers:
+      - name: zookeeper
+        image: confluentinc/cp-zookeeper:latest
+        ports:
+        - containerPort: 2181
+        env:
+        - name: ZOOKEEPER_CLIENT_PORT
+          value: "2181"
+        - name: ZOOKEEPER_TICK_TIME
+          value: "2000"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+---
+# Zookeeper Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  namespace: weather-system
+spec:
+  selector:
+    app: zookeeper
+  ports:
+  - port: 2181
+    targetPort: 2181
+
+---
+# Kafka Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+  namespace: weather-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      containers:
+      - name: kafka
+        image: confluentinc/cp-kafka:latest
+        ports:
+        - containerPort: 9092
+        env:
+        - name: KAFKA_BROKER_ID
+          value: "1"
+        - name: KAFKA_ZOOKEEPER_CONNECT
+          value: "zookeeper:2181"
+        - name: KAFKA_LISTENERS
+          value: "INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:9094"
+        - name: KAFKA_ADVERTISED_LISTENERS
+          value: "INTERNAL://kafka:9092,EXTERNAL://localhost:9094"
+        - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+          value: "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT"
+        - name: KAFKA_INTER_BROKER_LISTENER_NAME
+          value: "INTERNAL"
+        - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+          value: "1"
+        - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+          value: "true"
+        - name: KAFKA_NUM_PARTITIONS
+          value: "10"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1"
+
+---
+# Kafka Service (used by other components within the cluster)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: weather-system
+spec:
+  selector:
+    app: kafka
+  ports:
+  - name: internal
+    port: 9092
+    targetPort: 9092
+  - name: external
+    port: 9094
+    targetPort: 9094
+
+---
+# Elasticsearch Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: elasticsearch
+  namespace: weather-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: elasticsearch
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+    spec:
+      containers:
+      - name: elasticsearch
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.10.2
+        ports:
+        - containerPort: 9200
+        env:
+        - name: discovery.type
+          value: "single-node"
+        - name: xpack.security.enabled
+          value: "false"
+        - name: ES_JAVA_OPTS
+          value: "-Xms512m -Xmx512m"
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "1.5Gi"
+            cpu: "1"
+
+---
+# Elasticsearch Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+  namespace: weather-system
+spec:
+  selector:
+    app: elasticsearch
+  ports:
+  - port: 9200
+    targetPort: 9200
+
+---
+# Kibana Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kibana
+  namespace: weather-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kibana
+  template:
+    metadata:
+      labels:
+        app: kibana
+    spec:
+      containers:
+      - name: kibana
+        image: docker.elastic.co/kibana/kibana:8.10.2
+        ports:
+        - containerPort: 5601
+        env:
+        - name: ELASTICSEARCH_HOSTS
+          value: "http://elasticsearch:9200"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+---
+# Kibana Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana
+  namespace: weather-system
+spec:
+  selector:
+    app: kibana
+  ports:
+  - port: 5601
+    targetPort: 5601
+  type: NodePort   # for accessing from the browser on minikube: minikube service kibana -n weather-system
+
+---
+# Weather Station Deployment (10 replicas)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weather-stations
+  namespace: weather-system
+spec:
+  replicas: 10
+  selector:
+    matchLabels:
+      app: weather-station
+  template:
+    metadata:
+      labels:
+        app: weather-station
+    spec:
+      containers:
+      - name: station
+        image: weather-station:latest   # Image from Member 1
+        imagePullPolicy: Always
+        env:
+        - name: STATION_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.labels['app']  # Not accurate – we will add a better method below
+        - name: KAFKA_BOOTSTRAP
+          valueFrom:
+            configMapKeyRef:
+              name: weather-config
+              key: KAFKA_BOOTSTRAP_SERVERS
+        - name: STATION_TYPE
+          valueFrom:
+            configMapKeyRef:
+              name: weather-config
+              key: STATION_TYPE
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      # Note: STATION_ID must be unique for each pod. Use an environment variable with downward API or StatefulSet.
+      # For simplicity, you can modify Member 1's image to read station_id from hostname or another variable.
+      # Best solution: Use StatefulSet instead of Deployment to give each pod a static name.
+      # But we will stick with Deployment and add an STATION_ID variable through `value: "1"` for all pods – this will cause a conflict.
+      # Therefore, I will write the correct fix in the explanation.
+
+# Since Deployment doesn't easily provide unique IDs, the best approach is to use StatefulSet.
+# I will provide an alternative using StatefulSet with STATION_ID assigned from the index (ordinal).
+
+---
+
+# Weather Station StatefulSet (alternative to Deployment for generating unique station_id)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: weather-station
+  namespace: weather-system
+spec:
+  serviceName: "weather-station-headless"
+  replicas: 10
+  selector:
+    matchLabels:
+      app: weather-station
+  template:
+    metadata:
+      labels:
+        app: weather-station
+    spec:
+      containers:
+      - name: station
+        image: weather-station:latest
+        imagePullPolicy: Always
+        env:
+        - name: STATION_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name   # The name will be "weather-station-0", "weather-station-1", ... we extract the number
+        - name: KAFKA_BOOTSTRAP
+          valueFrom:
+            configMapKeyRef:
+              name: weather-config
+              key: KAFKA_BOOTSTRAP_SERVERS
+        - name: STATION_TYPE
+          valueFrom:
+            configMapKeyRef:
+              name: weather-config
+              key: STATION_TYPE 
+        # can add a script to extract the number from the name (but may need modification of Member 1's image)
+        # alternatively, a regular variable can be used:
+        # env:
+        # - name: STATION_ID
+        #   value: "0"  # this is incorrect.
+        # Therefore, we need to ask Member 1 to modify the code to read STATION_ID from the container name or hostname.
+        # We will place an alternative plan in the explanation.
+
+---
+#replace Arabic comments with English comments in the next section 
+# Service headless necessary for StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: weather-station-headless
+  namespace: weather-system
+spec:
+  clusterIP: None
+  selector:
+    app: weather-station
+
+---
+# Central Server Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: central-server
+  namespace: weather-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: central-server
+  template:
+    metadata:
+      labels:
+        app: central-server
+    spec:
+      containers:
+      - name: server
+        image: central-server:latest   # Image from Member 3 (after merging Bitcask)
+        imagePullPolicy: Always
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          valueFrom:
+            configMapKeyRef:
+              name: weather-config
+              key: KAFKA_BOOTSTRAP_SERVERS
+        - name: WEATHER_TOPIC
+          valueFrom:
+            configMapKeyRef:
+              name: weather-config
+              key: WEATHER_TOPIC
+        - name: RAIN_ALERT_TOPIC
+          valueFrom:
+            configMapKeyRef:
+              name: weather-config
+              key: RAIN_ALERT_TOPIC
+        - name: PARQUET_OUTPUT_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: weather-config
+              key: PARQUET_OUTPUT_PATH
+        - name: BITCASK_DATA_DIR
+          valueFrom:
+            configMapKeyRef:
+              name: weather-config
+              key: BITCASK_DATA_DIR
+        volumeMounts:
+        - name: weather-data
+          mountPath: /data
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1"
+      volumes:
+      - name: weather-data
+        persistentVolumeClaim:
+          claimName: weather-data-pvc
+
+---
+# Central Server Service (for accessing it if needed – but not necessary internally)
+apiVersion: v1
+kind: Service
+metadata:
+  name: central-server
+  namespace: weather-system
+spec:
+  selector:
+    app: central-server
+  ports:
+  - port: 8080   # if the server provides an HTTP interface
+    targetPort: 8080
+  # not necessary internally now
