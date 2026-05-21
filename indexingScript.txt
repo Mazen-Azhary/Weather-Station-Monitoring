@@ -1,0 +1,52 @@
+pip install pandas pyarrow requests
+
+
+
+script :  
+
+cat > fix_indexer.py << 'EOF'
+import glob, json, requests, pandas as pd
+
+ES_URL = "http://elasticsearch:9200"
+INDEX = "weather-readings"
+
+# حذف الفهرس القديم وإنشاء mapping صحيح
+requests.delete(f"{ES_URL}/{INDEX}")
+mapping = {"mappings": {"properties": {"status_timestamp": {"type": "date"}}}}
+requests.put(f"{ES_URL}/{INDEX}", json=mapping)
+
+bulk_data = ""
+files = glob.glob("/data/parquet/**/*.parquet", recursive=True)
+print(f"Found {len(files)} Parquet files")
+
+for file_path in files:
+    print(f"Processing {file_path}")
+    df = pd.read_parquet(file_path)
+    # تحويل timestamp من ثواني إلى مللي ثانية
+    if 'status_timestamp' in df.columns:
+        df['status_timestamp'] = df['status_timestamp'] * 1000
+    # توحيد الأنواع
+    for col in df.columns:
+        if df[col].dtype.name == 'categorical':
+            df[col] = df[col].astype(str)
+        elif 'int' in df[col].dtype.name:
+            df[col] = df[col].fillna(0).astype('int64')
+    for _, row in df.iterrows():
+        bulk_data += json.dumps({"index": {"_index": INDEX}}) + "\n"
+        bulk_data += json.dumps(row.to_dict()) + "\n"
+
+headers = {"Content-Type": "application/x-ndjson"}
+response = requests.post(f"{ES_URL}/_bulk", headers=headers, data=bulk_data)
+result = response.json()
+print(f"Response status: {response.status_code}")
+print(f"Errors: {result.get('errors')}")
+if not result.get('errors'):
+    print("Indexing successful!")
+else:
+    print("Some errors occurred. Check details above.")
+EOF
+
+then  :
+python fix_indexer.py
+
+curl "http://elasticsearch:9200/weather-readings/_count"

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: temp-indexer
+  namespace: weather-system
+spec:
+  volumes:
+  - name: weather-data
+    persistentVolumeClaim:
+      claimName: weather-data-pvc
+  containers:
+  - name: indexer
+    image: python:3.10-slim
+    command: ["sleep", "infinity"]
+    volumeMounts:
+    - name: weather-data
+      mountPath: /data

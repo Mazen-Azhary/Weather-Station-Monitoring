@@ -1,0 +1,182 @@
+================================================================================
+                  WEATHER MONITORING SYSTEM – DEPLOYMENT & INDEXING STEPS
+                                 (Member 4 – Anwar)
+================================================================================
+
+This document outlines the complete sequence of commands to deploy the system on 
+Kubernetes (minikube) and index Parquet files into Elasticsearch.
+
+================================================================================
+STEP 1: Apply Kubernetes Manifest
+================================================================================
+
+kubectl apply -f k8s-weather-system.yaml
+
+Wait for all pods to reach Running state:
+
+kubectl get pods -n weather-system -w
+
+Expected pods: zookeeper, kafka, elasticsearch, kibana, central-server, 
+and weather-station-0 through weather-station-9.
+
+================================================================================
+STEP 2: Load Local Docker Images into Minikube
+================================================================================
+
+docker save weather-station:latest | minikube ssh docker load
+docker save central-server:latest | minikube ssh docker load
+
+================================================================================
+STEP 3: Restart Deployments to Use Loaded Images
+================================================================================
+
+kubectl rollout restart statefulset weather-station -n weather-system
+kubectl rollout restart deployment central-server -n weather-system
+kubectl rollout restart deployment kafka -n weather-system
+
+================================================================================
+STEP 4: Verify Kafka Connectivity and Data Flow
+================================================================================
+
+# Check if weather stations are sending messages
+kubectl logs -n weather-system weather-station-0 --tail=10
+
+# Consume one message from Kafka
+kubectl exec -it -n weather-system deployment/kafka -- \
+  kafka-console-consumer --bootstrap-server kafka:9092 \
+  --topic weather-readings --from-beginning --max-messages 1 --timeout-ms 5000
+
+================================================================================
+STEP 5: Verify Parquet Files Are Being Written
+================================================================================
+
+# Check the shared PVC for Parquet files
+kubectl exec -it -n weather-system deployment/central-server -- \
+  ls -la /data/parquet/year=2026/month=05/day=21/station_id=1/
+
+Note: Adjust the date (year/month/day) according to the current date when running.
+
+================================================================================
+STEP 6: Create Temporary Indexer Pod with PVC Mount
+================================================================================
+
+Create file: temp-indexer-pod.yaml
+-----------------------------------------------------------
+apiVersion: v1
+kind: Pod
+metadata:
+  name: temp-indexer
+  namespace: weather-system
+spec:
+  volumes:
+  - name: weather-data
+    persistentVolumeClaim:
+      claimName: weather-data-pvc
+  containers:
+  - name: indexer
+    image: python:3.10-slim
+    command: ["sleep", "infinity"]
+    volumeMounts:
+    - name: weather-data
+      mountPath: /data
+-----------------------------------------------------------
+
+kubectl apply -f temp-indexer-pod.yaml
+
+================================================================================
+STEP 7: Install Dependencies Inside Indexer Pod
+================================================================================
+
+kubectl exec -it -n weather-system temp-indexer -- bash
+
+# Inside the pod, run:
+pip install pandas pyarrow requests
+
+================================================================================
+STEP 8: Create Elasticsearch Mapping and Index Parquet Files
+================================================================================
+
+# 8.1 Create proper mapping for status_timestamp as date field
+python -c "
+import requests
+ES_URL = 'http://elasticsearch:9200'
+INDEX = 'weather-readings'
+requests.delete(f'{ES_URL}/{INDEX}')
+mapping = {'mappings': {'properties': {'status_timestamp': {'type': 'date'}}}}
+requests.put(f'{ES_URL}/{INDEX}', json=mapping)
+print('Mapping created successfully')
+"
+
+# 8.2 Create and run the indexing script
+cat > indexer.py << 'EOF'
+import glob, json, requests, pandas as pd
+
+ES_URL = "http://elasticsearch:9200"
+INDEX = "weather-readings"
+
+bulk_data = ""
+files = glob.glob("/data/parquet/**/*.parquet", recursive=True)
+print(f"Found {len(files)} Parquet files")
+
+for file_path in files:
+    print(f"Processing {file_path}")
+    df = pd.read_parquet(file_path)
+    # Convert columns to consistent types
+    for col in df.columns:
+        if df[col].dtype.name == 'categorical':
+            df[col] = df[col].astype(str)
+        elif 'int' in df[col].dtype.name:
+            df[col] = df[col].fillna(0).astype('int64')
+    for _, row in df.iterrows():
+        bulk_data += json.dumps({"index": {"_index": INDEX}}) + "\n"
+        bulk_data += json.dumps(row.to_dict()) + "\n"
+
+headers = {"Content-Type": "application/x-ndjson"}
+response = requests.post(f"{ES_URL}/_bulk", headers=headers, data=bulk_data)
+result = response.json()
+print(f"Response status: {response.status_code}")
+print(f"Errors: {result.get('errors')}")
+if not result.get('errors'):
+    print("Indexing successful!")
+EOF
+
+# 8.3 Execute the indexing script
+python indexer.py
+
+# 8.4 Verify indexed document count
+python -c "import requests; print(requests.get('http://elasticsearch:9200/weather-readings/_count').text)"
+
+# 8.5 Exit the pod
+exit
+
+================================================================================
+STEP 9 (Optional): Clean Up Temporary Pod
+================================================================================
+
+kubectl delete pod temp-indexer -n weather-system
+
+================================================================================
+NEXT STEPS (Kibana Visualization & JFR Profiling)
+================================================================================
+
+1. Open Kibana:
+   minikube service kibana -n weather-system
+
+2. Create Data View:
+   - Stack Management → Data Views → Create data view
+   - Name: weather-readings
+   - Index pattern: weather-readings*
+   - Timestamp field: status_timestamp (type manually)
+
+3. Create visualizations:
+   - Pie chart: battery_status.keyword (shows 30% low, 40% medium, 30% high)
+   - Bar chart: station_id with count (for dropped message estimation)
+
+4. JFR Profiling on Central Server:
+   POD=$(kubectl get pods -n weather-system -l app=central-server -o jsonpath='{.items[0].metadata.name}')
+   kubectl exec -it -n weather-system $POD -- jcmd 1 JFR.start name=profile duration=60s filename=/tmp/profile.jfr
+   kubectl cp -n weather-system $POD:/tmp/profile.jfr ./profile.jfr
+
+================================================================================
+END OF DEPLOYMENT STEPS
+================================================================================

@@ -1,0 +1,46 @@
+=== Top 10 memory allocating classes ===
+   1095 
+
+=== Garbage Collection events (count and durations) ===
+jdk.GarbageCollection {
+  startTime = 15:05:20.770
+  duration = 1.688 ms
+  gcId = 1003
+  name = "DefNew"
+  cause = "Allocation Failure"
+  sumOfPauses = 1.688 ms
+  longestPause = 1.688 ms
+}
+
+jdk.GarbageCollection {
+  startTime = 15:05:35.771
+  duration = 1.881 ms
+  gcId = 1004
+  name = "DefNew"
+  cause = "Allocation Failure"
+  sumOfPauses = 1.881 ms
+  longestPause = 1.881 ms
+}
+
+jdk.GarbageCollection {
+  startTime = 15:05:50.448
+  duration = 779.781 us
+  gcId = 1005
+  name = "DefNew"
+  cause = "Allocation Failure"
+  sumOfPauses = 779.781 us
+  longestPause = 779.781 us
+}
+
+jdk.GarbageCollection {
+  startTime = 15:06:07.350
+  duration = 1.657 ms
+  gcId = 1006
+  name = "DefNew"
+  cause = "Allocation Failure"
+  sumOfPauses = 1.657 ms
+  longestPause = 1.657 ms
+}
+
+
+=== I/O events (none recorded) ===
