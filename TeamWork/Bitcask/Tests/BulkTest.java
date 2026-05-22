@@ -1,4 +1,6 @@
 import java.util.*;
+import java.util.LinkedHashMap;
+import com.example.centralstation.bitcask.*;
 
 // =============================================================================
 //  BulkTest — loads 10,000 synthetic records into Bitcask and reports results
@@ -57,19 +59,19 @@ public class BulkTest {
     // ── Entry point ───────────────────────────────────────────────────────────
     public static void main(String[] args) {
         printBanner();
-        Bitcask db = new Bitcask();
+        Bitcask db = Bitcask.getInstance();
 
         // ── Phase 1: bulk write ───────────────────────────────────────────────
         header("PHASE 1 — BULK WRITE  (" + TOTAL_RECORDS + " records)");
-        List<String> ids      = new ArrayList<>(TOTAL_RECORDS);
-        List<String> statuses = new ArrayList<>(TOTAL_RECORDS);
+        List<String>         ids      = new ArrayList<>(TOTAL_RECORDS);
+        Map<String, String>  expected = new LinkedHashMap<>();   // id → latest expected value
 
         long phaseStart = System.nanoTime();
         for (int i = 0; i < TOTAL_RECORDS; i++) {
             String id     = generateId();
             String status = randomStatus();
             ids.add(id);
-            statuses.add(status);
+            expected.put(id, status);
 
             long t0 = System.nanoTime();
             db.write(id, status);
@@ -91,7 +93,7 @@ public class BulkTest {
         phaseStart = System.nanoTime();
         for (int i = 0; i < ids.size(); i++) {
             String id       = ids.get(i);
-            String expected = statuses.get(i);
+            String exp      = expected.get(id);
 
             // Check cache before the call to classify hit/miss
             boolean hit = HashMapManager.getInstance().read(id) != null;
@@ -107,8 +109,8 @@ public class BulkTest {
 
             if (hit) cacheHits++; else cacheMisses++;
 
-            if (got != null && got.equals(expected)) verifyOk++;
-            else                                      verifyFail++;
+            if (got != null && got.equals(exp)) verifyOk++;
+            else                               verifyFail++;
 
             if ((i + 1) % PROGRESS_STEP == 0) {
                 progress("  read ", i + 1, ids.size(), phaseStart);
@@ -124,7 +126,7 @@ public class BulkTest {
         for (int i = 0; i < updateN; i++) {
             String id        = ids.get(i);
             String newStatus = randomStatus();
-            statuses.set(ids.indexOf(id), newStatus); // keep expected map in sync
+            expected.put(id, newStatus);  // update expected map with new value
 
             long t0 = System.nanoTime();
             db.write(id, newStatus);

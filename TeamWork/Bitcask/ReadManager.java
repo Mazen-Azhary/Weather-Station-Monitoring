@@ -1,3 +1,5 @@
+package com.example.centralstation.bitcask;
+
 public class ReadManager {
 
     private HintFileManager hfm;

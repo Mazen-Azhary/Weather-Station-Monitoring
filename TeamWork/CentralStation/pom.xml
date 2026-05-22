@@ -123,6 +123,43 @@
 
     <build>
         <plugins>
+
+            <!-- Auto-sync: copy Bitcask sources before compile, delete after package.
+                 TeamWork/Bitcask is the single source of truth — never edit the copy. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <!-- Copy Bitcask → CentralStation source tree before compilation -->
+                    <execution>
+                        <id>copy-bitcask-sources</id>
+                        <phase>generate-sources</phase>
+                        <goals><goal>run</goal></goals>
+                        <configuration>
+                            <target>
+                                <copy todir="${project.basedir}/src/main/java/com/example/centralstation/bitcask"
+                                      overwrite="true">
+                                    <fileset dir="${project.basedir}/../Bitcask"
+                                             includes="*.java"/>
+                                </copy>
+                            </target>
+                        </configuration>
+                    </execution>
+                    <!-- Delete the transient copy after packaging -->
+                    <execution>
+                        <id>delete-bitcask-copies</id>
+                        <phase>package</phase>
+                        <goals><goal>run</goal></goals>
+                        <configuration>
+                            <target>
+                                <delete dir="${project.basedir}/src/main/java/com/example/centralstation/bitcask"/>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
             <!-- Fat-JAR: embed all dependencies -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

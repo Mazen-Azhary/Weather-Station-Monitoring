@@ -1,3 +1,5 @@
+package com.example.centralstation.bitcask;
+
 import java.io.*;
 import java.util.*;
 
@@ -19,7 +21,7 @@ public class HintFileManager {
     // fetches the value, warms HashMapManager, and returns the value.
     // -------------------------------------------------------------------------
 
-    private static final String HINT_FILE_PATH = "./Files/global.hint";
+    private static final String HINT_FILENAME = "global.hint";
 
     private static HintFileManager instance;
 
@@ -131,7 +133,7 @@ public class HintFileManager {
         hintIndex.clear();
         hmm.clear();
 
-        File hintFile = new File(HINT_FILE_PATH);
+        File hintFile = new File(FileManager.getInstance().getDirectory() + HINT_FILENAME);
         if (!hintFile.exists()) return;
 
         // Scan whole file; last occurrence of each id wins (append-only log)
@@ -190,7 +192,7 @@ public class HintFileManager {
     // One entry per id (deduplicated); called after compaction.
     // -------------------------------------------------------------------------
     public void rebuildHintFile() {
-        File hintFile = new File(HINT_FILE_PATH);
+        File hintFile = new File(FileManager.getInstance().getDirectory() + HINT_FILENAME);
         if (hintFile.exists()) hintFile.delete();
         try {
             hintFile.createNewFile();
@@ -209,7 +211,7 @@ public class HintFileManager {
     // -------------------------------------------------------------------------
 
     private void appendToHintFile(String id, String filename, long offset, int size) {
-        File hintFile = new File(HINT_FILE_PATH);
+        File hintFile = new File(FileManager.getInstance().getDirectory() + HINT_FILENAME);
         try {
             if (!hintFile.exists()) hintFile.createNewFile();
             try (RandomAccessFile raf = new RandomAccessFile(hintFile, "rw")) {

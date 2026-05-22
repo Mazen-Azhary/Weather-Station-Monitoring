@@ -2,6 +2,7 @@ import java.io.*;
 import java.time.*;
 import java.time.format.*;
 import java.util.*;
+import com.example.centralstation.bitcask.*;
 
 // =============================================================================
 //  BitcaskCLI — interactive terminal dashboard for the Bitcask storage engine
@@ -93,7 +94,7 @@ public class TestBitcask {
     // ── TracedBitcask ─────────────────────────────────────────────────────────
     static class TracedBitcask {
 
-        private final Bitcask db = new Bitcask();
+        private final Bitcask db = Bitcask.getInstance();
 
         public void write(String id, String value) {
             logWrite("WRITE  id=" + BOLD + id + RESET + "  value=" + BOLD + value + RESET);
@@ -150,7 +151,7 @@ public class TestBitcask {
 
     // ── View: hint file ───────────────────────────────────────────────────────
     private static void viewHintFile() {
-        File hint = new File("../Files/global.hint");
+        File hint = new File(FileManager.getInstance().getDirectory() + "global.hint");
         System.out.println();
         System.out.println(CYAN + BOLD + "  ┌── global.hint (" + fmtBytes(hint.length()) + ") ──────────────────────────┐" + RESET);
 
@@ -383,7 +384,7 @@ public class TestBitcask {
     }
 
     private static void queryKey(String key) {
-        Bitcask db = new Bitcask();
+        Bitcask db = Bitcask.getInstance();
         String value = db.read(key);
         if (value != null) {
             System.out.println(GREEN + BOLD + "  ✓ " + key + " = " + RESET + value);
@@ -433,7 +434,7 @@ public class TestBitcask {
         try {
             String filename = String.format("%s_thread_%d.csv", timestamp, threadId);
             int successCount = 0;
-            Bitcask db = new Bitcask();
+            Bitcask db = Bitcask.getInstance();
 
             try (PrintWriter writer = new PrintWriter(new FileWriter(filename))) {
                 writer.println("key,value");
@@ -570,7 +571,7 @@ public class TestBitcask {
         printBanner();
         logInfo("Bitcask engine initialising ...");
         TracedBitcask db = new TracedBitcask();
-        logInfo("Engine ready. Files directory: ./Files/");
+        logInfo("Engine ready. Files directory: " + FileManager.getInstance().getDirectory());
         System.out.println();
         printMenu();
         System.out.println();

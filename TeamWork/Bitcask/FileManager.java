@@ -1,3 +1,5 @@
+package com.example.centralstation.bitcask;
+
 import java.io.*;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -11,7 +13,14 @@ public class FileManager {
     private File activeFile;
     private RandomAccessFile activeRAF;
     private static final int MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
-    private static final String DIRECTORY = "./Files/";
+    private static final String DIRECTORY;
+
+    static {
+        String envDir = System.getenv("BITCASK_DATA_DIR");
+        DIRECTORY = (envDir != null && !envDir.isBlank())
+                ? (envDir.endsWith("/") || envDir.endsWith("\\") ? envDir : envDir + "/")
+                : "./Files/";
+    }
     private static final int HEADER_BLOCK_SIZE = 1024 * 1024; // 1 MB reserved header (matches CompactionManager)
 
     // Binary record layout (written after the header block):

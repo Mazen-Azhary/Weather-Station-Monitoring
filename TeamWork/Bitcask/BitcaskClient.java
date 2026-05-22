@@ -1,3 +1,5 @@
+package com.example.centralstation.bitcask;
+
 import java.io.*;
 import java.util.*;
 import java.util.concurrent.*;
@@ -12,7 +14,7 @@ import java.util.concurrent.*;
  */
 public class BitcaskClient {
 
-    private static final Bitcask db = new Bitcask();
+    private static final Bitcask db = Bitcask.getInstance();
     private static final String TS_FORMAT = "yyyyMMddHHmmss";
 
     // SimpleDateFormat for timestamp generation

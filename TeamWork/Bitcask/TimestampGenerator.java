@@ -1,3 +1,5 @@
+package com.example.centralstation.bitcask;
+
 /**
  * Generates sortable, collision-resistant timestamps for filenames.
  * Format: yyyymmddhhmmss[counter]

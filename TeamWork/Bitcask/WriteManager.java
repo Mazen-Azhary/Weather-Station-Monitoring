@@ -1,3 +1,5 @@
+package com.example.centralstation.bitcask;
+
 public class WriteManager {
 
     private static final int WRITES_TILL_COMPACTION = 1000;
