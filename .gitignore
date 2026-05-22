@@ -22,3 +22,6 @@ gradle-app.setting
 *.class
 *.bin
 *.hint
+*.pdf
+.dist/
+.qodo/
